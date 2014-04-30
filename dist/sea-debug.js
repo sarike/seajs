@@ -1,5 +1,5 @@
 /**
- * Sea.js 2.1.1 | seajs.org/LICENSE.md
+ * Sea.js 2.3.0 | seajs.org/LICENSE.md
  */
 (function(global, undefined) {
 
@@ -10,10 +10,11 @@ if (global.seajs) {
 
 var seajs = global.seajs = {
   // The current version of Sea.js being used
-  version: "2.1.1"
+  version: "2.3.0"
 }
 
 var data = seajs.data = {}
+
 
 /**
  * util-lang.js - The minimal language enhancement
@@ -21,7 +22,7 @@ var data = seajs.data = {}
 
 function isType(type) {
   return function(obj) {
-    return Object.prototype.toString.call(obj) === "[object " + type + "]"
+    return {}.toString.call(obj) == "[object " + type + "]"
   }
 }
 
@@ -85,9 +86,9 @@ var emit = seajs.emit = function(name, data) {
     // Copy callback lists to prevent modification
     list = list.slice()
 
-    // Execute event callbacks
-    while ((fn = list.shift())) {
-      fn(data)
+    // Execute event callbacks, use index because it's the faster.
+    for(var i = 0, len = list.length; i < len; i++) {
+      list[i](data)
     }
   }
 
@@ -103,6 +104,7 @@ var DIRNAME_RE = /[^?#]*\//
 
 var DOT_RE = /\/\.\//g
 var DOUBLE_DOT_RE = /\/[^/]+\/\.\.\//
+var DOUBLE_SLASH_RE = /([^:/])\/\//g
 
 // Extract the directory portion of a path
 // dirname("a/b/c.js?t=123#xx/zz") ==> "a/b/"
@@ -121,6 +123,9 @@ function realpath(path) {
   while (path.match(DOUBLE_DOT_RE)) {
     path = path.replace(DOUBLE_DOT_RE, "/")
   }
+
+  // a//b/c  ==>  a/b/c
+  path = path.replace(DOUBLE_SLASH_RE, "$1/")
 
   return path
 }
@@ -221,6 +226,11 @@ function addBase(id, refUri) {
     ret = data.base + id
   }
 
+  // Add default protocol when uri begins with "//"
+  if (ret.indexOf("//") === 0) {
+    ret = location.protocol + ret
+  }
+
   return ret
 }
 
@@ -240,9 +250,8 @@ function id2Uri(id, refUri) {
 
 
 var doc = document
-var loc = location
-var cwd = dirname(loc.href)
-var scripts = doc.getElementsByTagName("script")
+var cwd = dirname(location.href)
+var scripts = doc.scripts
 
 // Recommend to add `seajsnode` id for the `sea.js` script element
 var loaderScript = doc.getElementById("seajsnode") ||
@@ -259,32 +268,23 @@ function getScriptAbsoluteSrc(node) {
 }
 
 
+// For Developers
+seajs.resolve = id2Uri
+
+
 /**
  * util-request.js - The utilities for requesting script and style files
  * ref: tests/research/load-js-css/test.html
  */
 
-var head = doc.getElementsByTagName("head")[0] || doc.documentElement
+var head = doc.head || doc.getElementsByTagName("head")[0] || doc.documentElement
 var baseElement = head.getElementsByTagName("base")[0]
-
-var IS_CSS_RE = /\.css(?:\?|$)/i
-var READY_STATE_RE = /^(?:loaded|complete|undefined)$/
 
 var currentlyAddingScript
 var interactiveScript
 
-// `onload` event is not supported in WebKit < 535.23 and Firefox < 9.0
-// ref:
-//  - https://bugs.webkit.org/show_activity.cgi?id=38995
-//  - https://bugzilla.mozilla.org/show_bug.cgi?id=185236
-//  - https://developer.mozilla.org/en/HTML/Element/link#Stylesheet_load_events
-var isOldWebKit = (navigator.userAgent
-    .replace(/.*AppleWebKit\/(\d+)\..*/, "$1")) * 1 < 536
-
-
 function request(url, callback, charset) {
-  var isCSS = IS_CSS_RE.test(url)
-  var node = doc.createElement(isCSS ? "link" : "script")
+  var node = doc.createElement("script")
 
   if (charset) {
     var cs = isFunction(charset) ? charset(url) : charset
@@ -293,16 +293,10 @@ function request(url, callback, charset) {
     }
   }
 
-  addOnload(node, callback, isCSS)
+  addOnload(node, callback, url)
 
-  if (isCSS) {
-    node.rel = "stylesheet"
-    node.href = url
-  }
-  else {
-    node.async = true
-    node.src = url
-  }
+  node.async = true
+  node.src = url
 
   // For some cache cases in IE 6-8, the script executes IMMEDIATELY after
   // the end of the insert execution, so use `currentlyAddingScript` to
@@ -317,71 +311,38 @@ function request(url, callback, charset) {
   currentlyAddingScript = null
 }
 
-function addOnload(node, callback, isCSS) {
-  var missingOnload = isCSS && (isOldWebKit || !("onload" in node))
+function addOnload(node, callback, url) {
+  var supportOnload = "onload" in node
 
-  // for Old WebKit and Old Firefox
-  if (missingOnload) {
-    setTimeout(function() {
-      pollCss(node, callback)
-    }, 1) // Begin after node insertion
-    return
-  }
-
-  node.onload = node.onerror = node.onreadystatechange = function() {
-    if (READY_STATE_RE.test(node.readyState)) {
-
-      // Ensure only run once and handle memory leak in IE
-      node.onload = node.onerror = node.onreadystatechange = null
-
-      // Remove the script to reduce memory leak
-      if (!isCSS && !data.debug) {
-        head.removeChild(node)
-      }
-
-      // Dereference the node
-      node = null
-
-      callback()
+  if (supportOnload) {
+    node.onload = onload
+    node.onerror = function() {
+      emit("error", { uri: url, node: node })
+      onload()
     }
   }
-}
-
-function pollCss(node, callback) {
-  var sheet = node.sheet
-  var isLoaded
-
-  // for WebKit < 536
-  if (isOldWebKit) {
-    if (sheet) {
-      isLoaded = true
-    }
-  }
-  // for Firefox < 9.0
-  else if (sheet) {
-    try {
-      if (sheet.cssRules) {
-        isLoaded = true
-      }
-    } catch (ex) {
-      // The value of `ex.name` is changed from "NS_ERROR_DOM_SECURITY_ERR"
-      // to "SecurityError" since Firefox 13.0. But Firefox is less than 9.0
-      // in here, So it is ok to just rely on "NS_ERROR_DOM_SECURITY_ERR"
-      if (ex.name === "NS_ERROR_DOM_SECURITY_ERR") {
-        isLoaded = true
+  else {
+    node.onreadystatechange = function() {
+      if (/loaded|complete/.test(node.readyState)) {
+        onload()
       }
     }
   }
 
-  setTimeout(function() {
-    if (isLoaded) {
-      // Place callback here to give time for style rendering
-      callback()
+  function onload() {
+    // Ensure only run once and handle memory leak in IE
+    node.onload = node.onerror = node.onreadystatechange = null
+
+    // Remove the script to reduce memory leak
+    if (!data.debug) {
+      head.removeChild(node)
     }
-    else {
-      pollCss(node, callback)
-    }
-  }, 20)
+
+    // Dereference the node
+    node = null
+
+    callback()
+  }
 }
 
 function getCurrentScript() {
@@ -408,6 +369,10 @@ function getCurrentScript() {
     }
   }
 }
+
+
+// For Developers
+seajs.request = request
 
 
 /**
@@ -507,7 +472,7 @@ Module.prototype.load = function() {
     m = Module.get(uris[i])
 
     if (m.status < STATUS.LOADED) {
-      // Maybe duplicate
+      // Maybe duplicate: When module has dupliate dependency, it should be it's count, not 1
       m._waitings[mod.uri] = (m._waitings[mod.uri] || 0) + 1
     }
     else {
@@ -611,7 +576,7 @@ Module.prototype.fetch = function(requestCache) {
   }
 
   function sendRequest() {
-    request(emitData.requestUri, emitData.onRequest, emitData.charset)
+    seajs.request(emitData.requestUri, emitData.onRequest, emitData.charset)
   }
 
   function onRequest() {
@@ -671,11 +636,6 @@ Module.prototype.exec = function () {
     exports = mod.exports
   }
 
-  // Emit `error` event
-  if (exports === null && !IS_CSS_RE.test(uri)) {
-    emit("error", mod)
-  }
-
   // Reduce memory leak
   delete mod.factory
 
@@ -694,7 +654,7 @@ Module.resolve = function(id, refUri) {
   var emitData = { id: id, refUri: refUri }
   emit("resolve", emitData)
 
-  return emitData.uri || id2Uri(emitData.id, refUri)
+  return emitData.uri || seajs.resolve(emitData.id, refUri)
 }
 
 // Define a module
@@ -762,6 +722,8 @@ Module.save = function(uri, meta) {
     mod.dependencies = meta.deps || []
     mod.factory = meta.factory
     mod.status = STATUS.SAVED
+
+    emit("save", mod)
   }
 }
 
@@ -792,32 +754,11 @@ Module.use = function (ids, callback, uri) {
   mod.load()
 }
 
-// Load preload modules before all other modules
-Module.preload = function(callback) {
-  var preloadMods = data.preload
-  var len = preloadMods.length
-
-  if (len) {
-    Module.use(preloadMods, function() {
-      // Remove the loaded preload modules
-      preloadMods.splice(0, len)
-
-      // Allow preload modules to add new preload modules
-      Module.preload(callback)
-    }, data.cwd + "_preload_" + cid())
-  }
-  else {
-    callback()
-  }
-}
-
 
 // Public API
 
 seajs.use = function(ids, callback) {
-  Module.preload(function() {
-    Module.use(ids, callback, data.cwd + "_use_" + cid())
-  })
+  Module.use(ids, callback, data.cwd + "_use_" + cid())
   return seajs
 }
 
@@ -831,9 +772,13 @@ seajs.Module = Module
 data.fetchedList = fetchedList
 data.cid = cid
 
-seajs.resolve = id2Uri
 seajs.require = function(id) {
-  return (cachedMods[Module.resolve(id)] || {}).exports
+  var mod = Module.get(Module.resolve(id))
+  if (mod.status < STATUS.EXECUTING) {
+    mod.onload()
+    mod.exec()
+  }
+  return mod.exports
 }
 
 
@@ -841,12 +786,8 @@ seajs.require = function(id) {
  * config.js - The configuration for the loader
  */
 
-var BASE_RE = /^(.+?\/)(\?\?)?(seajs\/)+/
-
 // The root path to use for id2uri parsing
-// If loaderUri is `http://test.com/libs/seajs/[??][seajs/1.2.3/]sea.js`, the
-// baseUri should be `http://test.com/libs/`
-data.base = (loaderDir.match(BASE_RE) || ["", loaderDir])[1]
+data.base = loaderDir
 
 // The loader directory
 data.dir = loaderDir
@@ -856,25 +797,6 @@ data.cwd = cwd
 
 // The charset for requesting files
 data.charset = "utf-8"
-
-// Modules that are needed to load before all other modules
-data.preload = (function() {
-  var plugins = []
-
-  // Convert `seajs-xxx` to `seajs-xxx=1`
-  // NOTE: use `seajs-xxx=1` flag in uri or cookie to preload `seajs-xxx`
-  var str = loc.search.replace(/(seajs-\w+)(&|$)/g, "$1=1$2")
-
-  // Add cookie string
-  str += " " + doc.cookie
-
-  // Exclude seajs-xxx=0
-  str.replace(/(seajs-\w+)=1/g, function(m, name) {
-    plugins.push(name)
-  })
-
-  return plugins
-})()
 
 // data.alias - An object containing shorthands of module id
 // data.paths - An object containing path shorthands in module id
@@ -895,13 +817,16 @@ seajs.config = function(configData) {
       }
     }
     else {
-      // Concat array config such as map, preload
+      // Concat array config such as map
       if (isArray(prev)) {
         curr = prev.concat(curr)
       }
       // Make sure that `data.base` is an absolute path
       else if (key === "base") {
-        (curr.slice(-1) === "/") || (curr += "/")
+        // Make sure end with "/"
+        if (curr.slice(-1) !== "/") {
+          curr += "/"
+        }
         curr = addBase(curr)
       }
 
@@ -913,6 +838,5 @@ seajs.config = function(configData) {
   emit("config", configData)
   return seajs
 }
-
 
 })(this);

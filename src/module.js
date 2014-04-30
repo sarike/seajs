@@ -73,7 +73,7 @@ Module.prototype.load = function() {
     m = Module.get(uris[i])
 
     if (m.status < STATUS.LOADED) {
-      // Maybe duplicate
+      // Maybe duplicate: When module has dupliate dependency, it should be it's count, not 1
       m._waitings[mod.uri] = (m._waitings[mod.uri] || 0) + 1
     }
     else {
@@ -177,7 +177,7 @@ Module.prototype.fetch = function(requestCache) {
   }
 
   function sendRequest() {
-    request(emitData.requestUri, emitData.onRequest, emitData.charset)
+    seajs.request(emitData.requestUri, emitData.onRequest, emitData.charset)
   }
 
   function onRequest() {
@@ -237,11 +237,6 @@ Module.prototype.exec = function () {
     exports = mod.exports
   }
 
-  // Emit `error` event
-  if (exports === null && !IS_CSS_RE.test(uri)) {
-    emit("error", mod)
-  }
-
   // Reduce memory leak
   delete mod.factory
 
@@ -260,7 +255,7 @@ Module.resolve = function(id, refUri) {
   var emitData = { id: id, refUri: refUri }
   emit("resolve", emitData)
 
-  return emitData.uri || id2Uri(emitData.id, refUri)
+  return emitData.uri || seajs.resolve(emitData.id, refUri)
 }
 
 // Define a module
@@ -328,6 +323,8 @@ Module.save = function(uri, meta) {
     mod.dependencies = meta.deps || []
     mod.factory = meta.factory
     mod.status = STATUS.SAVED
+
+    emit("save", mod)
   }
 }
 
@@ -358,32 +355,11 @@ Module.use = function (ids, callback, uri) {
   mod.load()
 }
 
-// Load preload modules before all other modules
-Module.preload = function(callback) {
-  var preloadMods = data.preload
-  var len = preloadMods.length
-
-  if (len) {
-    Module.use(preloadMods, function() {
-      // Remove the loaded preload modules
-      preloadMods.splice(0, len)
-
-      // Allow preload modules to add new preload modules
-      Module.preload(callback)
-    }, data.cwd + "_preload_" + cid())
-  }
-  else {
-    callback()
-  }
-}
-
 
 // Public API
 
 seajs.use = function(ids, callback) {
-  Module.preload(function() {
-    Module.use(ids, callback, data.cwd + "_use_" + cid())
-  })
+  Module.use(ids, callback, data.cwd + "_use_" + cid())
   return seajs
 }
 
@@ -397,8 +373,12 @@ seajs.Module = Module
 data.fetchedList = fetchedList
 data.cid = cid
 
-seajs.resolve = id2Uri
 seajs.require = function(id) {
-  return (cachedMods[Module.resolve(id)] || {}).exports
+  var mod = Module.get(Module.resolve(id))
+  if (mod.status < STATUS.EXECUTING) {
+    mod.onload()
+    mod.exec()
+  }
+  return mod.exports
 }
 

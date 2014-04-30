@@ -6,6 +6,7 @@ var DIRNAME_RE = /[^?#]*\//
 
 var DOT_RE = /\/\.\//g
 var DOUBLE_DOT_RE = /\/[^/]+\/\.\.\//
+var DOUBLE_SLASH_RE = /([^:/])\/\//g
 
 // Extract the directory portion of a path
 // dirname("a/b/c.js?t=123#xx/zz") ==> "a/b/"
@@ -24,6 +25,9 @@ function realpath(path) {
   while (path.match(DOUBLE_DOT_RE)) {
     path = path.replace(DOUBLE_DOT_RE, "/")
   }
+
+  // a//b/c  ==>  a/b/c
+  path = path.replace(DOUBLE_SLASH_RE, "$1/")
 
   return path
 }
@@ -124,6 +128,11 @@ function addBase(id, refUri) {
     ret = data.base + id
   }
 
+  // Add default protocol when uri begins with "//"
+  if (ret.indexOf("//") === 0) {
+    ret = location.protocol + ret
+  }
+
   return ret
 }
 
@@ -143,9 +152,8 @@ function id2Uri(id, refUri) {
 
 
 var doc = document
-var loc = location
-var cwd = dirname(loc.href)
-var scripts = doc.getElementsByTagName("script")
+var cwd = dirname(location.href)
+var scripts = doc.scripts
 
 // Recommend to add `seajsnode` id for the `sea.js` script element
 var loaderScript = doc.getElementById("seajsnode") ||
@@ -160,4 +168,8 @@ function getScriptAbsoluteSrc(node) {
     // see http://msdn.microsoft.com/en-us/library/ms536429(VS.85).aspx
       node.getAttribute("src", 4)
 }
+
+
+// For Developers
+seajs.resolve = id2Uri
 

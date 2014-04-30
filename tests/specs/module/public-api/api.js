@@ -33,9 +33,10 @@ define(function(require, exports, mod) {
 
   assert(isFunction(seajs.Module), 'seajs.Module')
   assert(isFunction(seajs.resolve), 'seajs.resolve')
+  assert(isFunction(seajs.request), 'seajs.request')
   assert(isFunction(seajs.require), 'seajs.require')
 
-  assert(getOwnPropertyCount(seajs) === 11, getOwnPropertyCount(seajs))
+  assert(getOwnPropertyCount(seajs) === 12, getOwnPropertyCount(seajs))
 
 
   // define
@@ -54,7 +55,7 @@ define(function(require, exports, mod) {
   assert(isFunction(Module.save), 'Module.save')
   assert(isFunction(Module.get), 'Module.get')
   assert(isFunction(Module.use), 'Module.use')
-  assert(isFunction(Module.preload), 'Module.preload')
+//  assert(isFunction(Module.preload), 'Module.preload')
 
   assert(isFunction(Module.prototype.resolve), 'Module.prototype.resolve')
   assert(isFunction(Module.prototype.load), 'Module.prototype.load')
@@ -62,7 +63,7 @@ define(function(require, exports, mod) {
   assert(isFunction(Module.prototype.fetch), 'Module.prototype.fetch')
   assert(isFunction(Module.prototype.exec), 'Module.prototype.exec')
 
-  assert(getOwnPropertyCount(Module) === 7, getOwnPropertyCount(Module))
+  assert(getOwnPropertyCount(Module) === 6, getOwnPropertyCount(Module))
   assert(getOwnPropertyCount(Module.prototype) === 5, getOwnPropertyCount(Module.prototype))
 
   
